@@ -1,5 +1,11 @@
 module ASTMatching
 
+struct UnionType{Base, Key, Arg} end
+
 # Write your package code here.
+include("patterns.jl")
+include("treegen.jl")
+include("codegen.jl")
+include("macros.jl")
 
 end
