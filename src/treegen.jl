@@ -10,28 +10,28 @@ struct Switch{K, T} <: DTree{K}
 	default::Union{DTree{K}, Nothing}
 end
 
-const MatchMatrix{K} = Vector{Pair{V, T}} where {P<:Pat{K}, V<:Vector{P}, T}
+const MatchMatrix{K} = Vector{Pair{V, T}} where {P<:Pat, V<:Vector{P}, T}
 
 preprocess_variables(occ::Vector{Int}, p::StarPat, occMap::Dict{Vector{Int}, Symbol}) = (p, Dict{Symbol, Symbol}())
-preprocess_variables(occ::Vector{Int}, ::VarPat{C}, occMap::Dict{Vector{Int}, Symbol}) where K = (StarPat(), Dict{Symbol, Symbol}(C=>get!(()->gensym(), occMap, occ)))
-function preprocess_variables(occ::Vector{Int}, v::CstrPat{K}, occMap::Dict{Vector{Int}, Symbol}) where K
+preprocess_variables(occ::Vector{Int}, v::VarPat, occMap::Dict{Vector{Int}, Symbol}) = (StarPat(), Dict{Symbol, Symbol}(v.var=>get!(()->gensym(), occMap, occ)))
+function preprocess_variables(occ::Vector{Int}, v::CstrPat, occMap::Dict{Vector{Int}, Symbol})
 	out = Dict{Symbol, Symbol}()
-	out_pats = Pat{K}[]
+	out_pats = Pat[]
 	for (i,arg) in enumerate(v.args)
 		pat, vars = preprocess_variables([occ; i], arg, occMap)
 		merge!(out, vars)
 		push!(out_pats, pat)
 	end
-	return (CstrPat{K}(v.cstr, out_pats), out)
+	return (CstrPat(v.cstr, out_pats), out)
 end
 
-function preprocess_variables(P::Vector{Vector{Pat{K}}}, A::Vector{T}) where {K, T}
+function preprocess_variables(P::Vector{Vector{Pat}}, A::Vector{T}) where {T}
 	occMap = Dict{Vector{Int}, Symbol}()
-	out_pats = Vector{Pat{K}}[]
+	out_pats = Vector{Pat}[]
 	out_exprs = Expr[]
 	for (pattern, expr) in zip(P, A)
 		varMap = Dict{Symbol, Symbol}()
-		pats = Pat{K}[]
+		pats = Pat[]
 		for (i, pat_elem) in enumerate(pattern)
 			pat,vars = preprocess_variables([i], pat_elem, occMap)
 			merge!(varMap, vars)
@@ -43,13 +43,13 @@ function preprocess_variables(P::Vector{Vector{Pat{K}}}, A::Vector{T}) where {K,
 	end
 	return out_pats, out_exprs, occMap
 end
-function preprocess_variables(P::Vector{Pair{Vector{Pat{K}}, T}}) where {K, T}
+function preprocess_variables(P::Vector{Pair{Vector{Pat}, T}}) where {T}
 	pats, exprs, occMap = preprocess_variables(first.(P), last.(P))
 	return Pair.(pats, exprs), occMap
 end
 
-function S(t, cstr_head::K, i, P::Vector{Vector{Pat{K}}}, A::Vector{T}) where {K,T}
-	rowty = Pair{Vector{Pat{K}}, T}
+function S(constructors, t, cstr_head, i, P::Vector{Vector{Pat}}, A::Vector{T}) where {T}
+	rowty = Pair{Vector{Pat}, T}
 	patlen = length(first(P))
 	@assert all(l->l==patlen, length.(P))
 	@assert length(P) == length(A)
@@ -62,16 +62,15 @@ function S(t, cstr_head::K, i, P::Vector{Vector{Pat{K}}}, A::Vector{T}) where {K
 		if c.cstr == cstr_head
 			@assert length(c.args) == length(arguments)
 			[[prefix; c.args; postfix] => a] 
-		else 
-			println("not equal!")
+		else
 			rowty[]
 		end
-	makerows(prefix, ::StarPat, postfix, a) = rowty[[prefix; repeat([StarPat{K}()], length(arguments)); postfix] => a]
-	makerows(prefix, o::OrPat, postfix, a) = [S(t, c, i, [[prefix; o.left; postfix]], [a]); S(t, c, i, [[prefix; o.right; postfix]], [a])]
+	makerows(prefix, ::StarPat, postfix, a) = rowty[[prefix; repeat([StarPat()], length(arguments)); postfix] => a]
+	makerows(prefix, o::OrPat, postfix, a) = [S(constructors, t, cstr_head, i, [[prefix; o.left; postfix]], [a]); S(constructors, t, cstr_head, i, [[prefix; o.right; postfix]], [a])]
 	out = vcat((makerows.(adj_prefix, patterns, adj_postfix, A))...)
 	return out
 end
-function D(i, P::Vector{Vector{Pat{K}}}, A::Vector{T}) where {K,T}
+function D(i, P::Vector{Vector{Pat}}, A::Vector{T}) where {T}
 	rowty = Pair{Vector{Pat{K}}, T}
 	makerows(prefix, ::CstrPat, postfix, a) = rowty[]
 	makerows(prefix, ::StarPat, postfix, a) = rowty[[prefix; postfix] => a]

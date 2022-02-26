@@ -14,39 +14,57 @@ end
 	@test constructors(List) == Dict([:Cons => Any[:List, :String], :Nil=>Any[]])
 	@test constructor_keys(List) == Dict([:Cons => :cons, :Nil => :nil])
 
-	@test ASTMatching.iswildcard(ASTMatching.StarPat)
-	@test !ASTMatching.iswildcard(ASTMatching.VarPat{:test})
+	@test ASTMatching.iswildcard(ASTMatching.StarPat())
+	@test !ASTMatching.iswildcard(ASTMatching.VarPat(:test))
 	
 
-	@test ASTMatching.heads(ASTMatching.CstrPat{:head, 0, Tuple{}}) == Set{Symbol}([:head])
+	@test ASTMatching.heads(ASTMatching.CstrPat(:head, [])) == Set{Symbol}([:head])
 	@test ASTMatching.heads(
-		ASTMatching.OrPat{
-			ASTMatching.CstrPat{:head1, 0, Tuple{}},
-			ASTMatching.CstrPat{:head2, 0, Tuple{}}}) == Set{Symbol}([:head1, :head2])
+		ASTMatching.OrPat(
+			ASTMatching.CstrPat(:head1, []),
+			ASTMatching.CstrPat(:head2, []))) == Set{Symbol}([:head1, :head2])
 
-	@test ASTMatching.extract_pattern(:a) == ASTMatching.VarPat{:a}
-	@test ASTMatching.extract_pattern(:(_)) == ASTMatching.StarPat
-	@test ASTMatching.extract_pattern(:(C())) == ASTMatching.CstrPat{:C, 0, Tuple{}}
-	@test ASTMatching.extract_pattern(:(C(a, _))) == ASTMatching.CstrPat{:C, 2, Tuple{ASTMatching.VarPat{:a}, ASTMatching.StarPat}}
-	@test ASTMatching.extract_pattern(:(C(a, D()))) == ASTMatching.CstrPat{:C, 2, Tuple{ASTMatching.VarPat{:a}, ASTMatching.CstrPat{:D, 0, Tuple{}}}}
+	@test ASTMatching.extract_pattern(:a) == ASTMatching.VarPat(:a)
+	@test ASTMatching.extract_pattern(:(_)) == ASTMatching.StarPat()
+	@test ASTMatching.extract_pattern(:(C())) == ASTMatching.CstrPat(:C, [])
+	@test ASTMatching.extract_pattern(:(C(a, _))) == ASTMatching.CstrPat(:C, [ASTMatching.VarPat(:a), ASTMatching.StarPat()])
+	@test ASTMatching.extract_pattern(:(C(a, D()))) == ASTMatching.CstrPat(:C, [ASTMatching.VarPat(:a), ASTMatching.CstrPat(:D, [])])
 
-	@test ASTMatching.extract_case(:(C() => 2+2)) == (Tuple{ASTMatching.CstrPat{:C, 0, Tuple{}}} => :(2+2))
+	@test ASTMatching.extract_case(:(C() => 2+2)) == ([ASTMatching.CstrPat(:C, [])] => :(2+2))
 	@test ASTMatching.extract_patterns(quote 
 		C() => 2+2
-	end) == [(Tuple{ASTMatching.CstrPat{:C, 0, Tuple{}}} => :(2+2))]
+	end) == [[ASTMatching.CstrPat(:C, [])] => :(2+2)]
 	@test ASTMatching.extract_patterns(quote 
 		C() => 2+2
 		D(e) => 3+e
 	end) == [
-		(Tuple{ASTMatching.CstrPat{:C, 0, Tuple{}}} => :(2+2)),
-		(Tuple{ASTMatching.CstrPat{:D, 1, Tuple{ASTMatching.VarPat{:e}}}} => :(3+e))]
+		[ASTMatching.CstrPat(:C, [])] => :(2+2),
+		[ASTMatching.CstrPat(:D, [ASTMatching.VarPat(:e)])] => :(3+e)]
 
-	test_patterns = ASTMatching.extract_patterns(quote 
+	preproc_pat, vars = ASTMatching.preprocess_variables(ASTMatching.extract_patterns(quote 
 		C() => 2+2
 		D(e) => 3+e
-	end)
-	ASTMatching.preprocess_variables(test_patterns)
+	end))
+	@test haskey(vars, [1,1])
+	@test vars[[1,1]] == last(preproc_pat[2]).args[1].args[2]
 
+	preproc_pat, vars = ASTMatching.preprocess_variables(ASTMatching.extract_patterns(quote 
+		(_, C()) => 2+2
+		(_, D(e)) => 3+e
+	end))
+	@test haskey(vars, [2,1])
+	@test vars[[2,1]] == last(preproc_pat[2]).args[1].args[2]
+
+	@test ASTMatching.S(constructors, List, :Cons, 1, 
+		[ASTMatching.Pat[ASTMatching.CstrPat(:Cons, [ASTMatching.StarPat(), ASTMatching.StarPat()])]], [1]) == [[ASTMatching.StarPat(), ASTMatching.StarPat()] => 1]
+	@test ASTMatching.S(constructors, List, :Cons, 1, 
+		[ASTMatching.Pat[ASTMatching.CstrPat(:Nil, [])]], [1]) == []
+	@test ASTMatching.S(constructors, List, :Cons, 1, 
+		[ASTMatching.Pat[ASTMatching.StarPat()]], [1]) == [[ASTMatching.StarPat(), ASTMatching.StarPat()] => 1]
+	@test ASTMatching.S(constructors, List, :Cons, 1, 
+		[ASTMatching.Pat[ASTMatching.OrPat(ASTMatching.StarPat(), ASTMatching.CstrPat(:Cons, [ASTMatching.StarPat(), ASTMatching.StarPat()]))]], [1]) == 
+		[[ASTMatching.StarPat(), ASTMatching.StarPat()] => 1,
+		 [ASTMatching.StarPat(), ASTMatching.StarPat()] => 1]
 
 
 	#=
