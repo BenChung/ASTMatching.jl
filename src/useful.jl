@@ -72,15 +72,15 @@ function counterexample(constructors, P::Vector{Vector{Pat}}, ts::Vector{Type}, 
 			rec = counterexample(constructors, 
 				specialize_matrix(constructors, typ, head, P), 
 				specialize_tyvect(constructors, typ, head, ts), 
-				nhead + n -1)
-			if !(rec is EmptyPat)
+				nhead + n - 1)
+			if !(rec isa EmptyPat)
 				return Pat[CstrPat(head, rec[1:nhead]); rec[nhead+1:end]]
 			end
 		end
 		return EmptyPat()
 	else
 		rec = counterexample(constructors, default_mat(P), n-1)
-		if rec is EmptyPat()
+		if rec isa EmptyPat()
 			return EmptyPat()
 		end
 		if isempty(matched_heads) || !hasmethod(constructors, Tuple{Type{typ}})
