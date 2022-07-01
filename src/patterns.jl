@@ -12,6 +12,12 @@ struct OrPat <: Pat
 	right::Pat
 end
 
+struct MatchCase
+	patterns::Vector{Pat}
+	body::Any
+end
+Base.:(==)(a::MatchCase, b::MatchCase) = all(a.patterns .== b.patterns) && a.body == b.body
+
 iswildcard(::StarPat) = true
 iswildcard(::Pat) = false
 
@@ -54,12 +60,12 @@ function extract_case(expr::Expr)
 		exprs = Pat[extract_pattern(expr.args[2])]
 	end
 	term = expr.args[3]
-	return Pair{Vector{Pat}, Any}(exprs, term)
+	return MatchCase(exprs, term)
 end
 function extract_patterns(expr)
 	if expr.head == :block
-		return Pair{Vector{Pat}, Any}[extract_case(t) for t in expr.args if t isa Expr]
+		return MatchCase[extract_case(t) for t in expr.args if t isa Expr]
 	elseif expr.head == :call && expr.args[1] == :(=>)
-		return Pair{Vector{Pat}, Any}[extract_case(expr)]
+		return MatchCase[extract_case(expr)]
 	end
 end

@@ -1,25 +1,22 @@
-
-
-compile(l::Leaf{K}, var_map::Dict{Vector{Int}, Symbol}) where K = l.term
-compile(::Fail{K}, var_map::Dict{Vector{Int}, Symbol}) where K = 
+compile(constructor_keys, constructors, l::Leaf, var_map::Dict{Vector{Int}, Symbol}) = l.term
+compile(constructor_keys, constructors, ::Fail, var_map::Dict{Vector{Int}, Symbol}) = 
 		:(throw(Exception("Pattern matching failed!")))
-function compile(s::Switch{K, T}, var_map::Dict{Vector{Int}, Symbol}) where {K,T}
+function compile(constructor_keys, constructors, s::Switch{T}, var_map::Dict{Vector{Int}, Symbol}) where {T}
 	cases = s.cases
 	cstrs = constructors(T)
 	cstr_keys = constructor_keys(T)
 	occ = s.occ
 	function make_conditional(case_idx)
-		println(var_map[occ])
 		# condition
-		cond = :(headof($(var_map[occ])) == $(cstr_keys[first(cases[case_idx])]))
+		cond = :(headof($T, $(var_map[occ])) == $(QuoteNode(cstr_keys[first(cases[case_idx])])))
 		# body
 		body = :(begin end)
 		arity = length(cstrs[first(cases[case_idx])])
 		for i = 1:arity
 			var=get!(()->gensym(), var_map, [occ; i])
-			push!(body.args, :($var = argof($(var_map[occ]), $i)))
+			push!(body.args, :($var = argof($T, $(var_map[occ]), $i)))
 		end
-		push!(body.args, compile(last(cases[case_idx]), var_map))
+		push!(body.args, compile(constructor_keys, constructors, last(cases[case_idx]), var_map))
 		return cond, body
 	end
 
@@ -43,16 +40,16 @@ function compile(s::Switch{K, T}, var_map::Dict{Vector{Int}, Symbol}) where {K,T
 		expr = out_expr
 	end
 	if !isnothing(s.default)
-		push!(expr.args, compile(s.default, var_map))
+		push!(expr.args, compile(constructor_keys, constructors, s.default, var_map))
 	end
 	return expr
 end
-function toplevel_compile(t::DTree{K}, inputs::Vector{T}, var_map::Dict{Vector{Int}, Symbol}) where {T,K}
+function toplevel_compile(constructor_keys, constructors, t::DTree, inputs::Vector{T}, var_map::Dict{Vector{Int}, Symbol}) where {T}
 	out = :(begin end)
 	for i=1:length(inputs)
 		var = get!(()->gensym(), var_map, [i])
 		push!(out.args, :($var = $(inputs[i])))
 	end
-	push!(out.args, compile(t, var_map))
+	push!(out.args, compile(constructor_keys, constructors, t, var_map))
 	return out
 end

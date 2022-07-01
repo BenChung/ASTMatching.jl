@@ -51,7 +51,6 @@ function parse_definition(expr)
 	basetype = eval(name_defn.args[2])
 	keyname = name_defn.args[3]
 	argsname = name_defn.args[4]
-	print(expr.args[2])
 	cstrs = parse_constructors(expr.args[2])
 	return MatchType(name, basetype, keyname, argsname, cstrs)
 end
@@ -71,23 +70,26 @@ function _matchtype(typedecl, cstrs)
     constructor_heads = getproperty.(cases, :name)
     case_keys = getproperty.(cases, :key)
     constructor_arguments = getproperty.(cases, :arg_typs)
-    constructor_pairs = Pair.(constructor_heads, constructor_arguments)
+    constructor_pairs = map((head, typ)->:($head => [$(typ...)]), QuoteNode.(constructor_heads), constructor_arguments)
     key_pairs = Pair.(constructor_heads, case_keys)
 
     push!(expr.args, quote	
     	const $tyname = ASTMatching.UnionType{$hostname, $tykey, $tyargs}
 	end)
     push!(expr.args, quote	
-    	headof(e::$tyname) = e.$tykey
+    	headof(::Type{$tyname}, e::$hostname) = e.$(tykey.value)
 	end)
     push!(expr.args, quote	
-    	argof(e::$tyname, i) = e.$tyargs[i]
+    	argof(::Type{$tyname}, e::$hostname, i) = e.$(tyargs.value)[i]
 	end)
     push!(expr.args, quote	
     	constructors(::Type{$tyname}) = Dict($(constructor_pairs...))
 	end)
 	push!(expr.args, quote
 		constructor_keys(::Type{$tyname}) = Dict($(key_pairs...))
+	end)
+	push!(expr.args, quote
+		@generated keytype(t::Type{$tyname}) = :(fieldtype($(Expr(:$, :t)), $tykey))
 	end)
     return esc(expr)
 end
@@ -103,9 +105,66 @@ pat ::=
 	pat || pat => Or{pat, pat}
 =#
 
-@generated function _matchfun(receiver::T) where T
-end
 
 macro astmatch(discriminant, patterns)
-	_compile(patterns)
+	preproc_pat, callbacks, vars = ASTMatching.preprocess_variables(ASTMatching.extract_patterns(patterns))
+	matchfun = gensym("match")
+	extracted_disc = Any[]
+	extracted_disc_tys = Any[]
+	function parse_discriminant(expr)
+		@assert(expr.head == :(::))
+		return esc(expr.args[1]), esc(expr.args[2])
+	end
+	if discriminant isa Expr 
+		if discriminant.head == :tuple
+			combined = parse_discriminant.(discriminant.args)
+			append!(extracted_disc, getindex.(combined, 1))
+			append!(extracted_disc_tys, getindex.(combined, 2))
+		elseif discriminant.head == :(::)
+			disc,ty = parse_discriminant(discriminant)
+			push!(extracted_disc, disc)
+			push!(extracted_disc_tys, ty)
+		else
+			throw("discriminant must be a tuple or symbol") 
+		end
+	else
+		throw("discriminant must be a tuple or symbol") 
+	end
+	base_occ = [[1] for disc in extracted_disc]
+	argnms = [gensym() for arg in extracted_disc]
+	argtys = [gensym() for arg in extracted_disc]
+	args = [:($((argnm))::$argty) for (argnm, argty) in zip(argnms, argtys)]
+	tyargnms = [gensym() for arg in extracted_disc]
+	typ_args = [:(::Type{$tyargnm}) for (tyargnm, argty) in zip(tyargnms, argtys)]
+	empty_typ_args = [:($tyargnm::Any) for (tyargnm, argty) in zip(tyargnms, argtys)]
+	cstrs = (:constructors)
+	cstr_keys = (:constructor_keys)
+	tyargs = [:($tyargnm <: (ASTMatching.UnionType{$argty, K, A} where {K, A})) for (tyargnm, argty) in zip(tyargnms, argtys)]
+	star_pat = Pat[StarPat() for arg in extracted_disc]
+	pats_only = ASTMatching.patterns.(preproc_pat)
+
+	callback_defns = [:(($((esc.(ASTMatching.vars(callback)))...), ) -> $(esc(expr(callback)))) for callback in callbacks]
+
+	genfunc = quote 
+		function $matchfun($(argnms...), $(empty_typ_args...), $(((name.(callbacks)))...)) 
+			realtys = typeof.($argnms)
+			argtys = [$(tyargnms...)]
+			throw("Attempted to match on $realtys when expecting $argtys")
+		end
+		@generated function $matchfun($(args...), $(typ_args...), $(((name.(callbacks)))...)) where {$(argtys...), $(tyargs...)}
+			ts = Type[$(tyargnms...)]
+			useful = ASTMatching.useful($cstrs, $pats_only, $star_pat, ts)
+			if useful 
+				throw("incomplete match")
+			end
+			compiled_match = ASTMatching.cc($cstrs, $base_occ, $preproc_pat, ts)
+			return ASTMatching.toplevel_compile($cstr_keys, $cstrs, compiled_match, $argnms, $vars)
+		end
+	end
+	__module__.eval(genfunc) 
+
+	out= quote 
+		$(esc(matchfun))($(extracted_disc...), $(extracted_disc_tys...), $(callback_defns...), )
+	end
+	return out
 end
