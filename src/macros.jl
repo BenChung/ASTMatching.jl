@@ -155,7 +155,8 @@ macro astmatch(discriminant, patterns)
 			ts = Type[$(tyargnms...)]
 			useful = ASTMatching.useful($cstrs, $pats_only, $star_pat, ts)
 			if useful 
-				throw("incomplete match")
+				cex = ASTMatching.counterexample($cstrs, $pats_only, ts)
+				throw("incomplete match counterexample: $cex")
 			end
 			compiled_match = ASTMatching.cc($cstrs, $base_occ, $preproc_pat, ts)
 			return ASTMatching.toplevel_compile($cstr_keys, $cstrs, compiled_match, $argnms, $vars)

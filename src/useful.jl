@@ -55,11 +55,38 @@ function useful(constructors, typ, P::Vector{Vector{Pat}}, h::StarPat, q::Vector
 end
 useful(constructors, typ, P::Vector{Vector{Pat}}, h::OrPat, q::Vector{Pat}, ts::Vector{Type}) = useful(P, [h.left;q[2:end]], ts) || useful(P, [h.right;q[2:end]], ts)
 
+abstract type CounterPat end
+struct StarCounterPat <: CounterPat
+	typ::Type
+end
+struct CstrCounterPat <: CounterPat
+	cstr::Symbol
+	args::Vector{CounterPat}
+	typ::Type
+end
+Base.:(==)(a::StarCounterPat, b::StarCounterPat) = a.typ == b.typ
+Base.:(==)(a::CstrCounterPat, b::CstrCounterPat) = a.cstr == b.cstr && all(a.args .== b.args) && a.typ == b.typ
+function Base.show(io::IO, x::StarCounterPat) 
+	print(io, "_::")
+	Base.show(io, x.typ)
+end
+function Base.show(io::IO, x::CstrCounterPat)
+	print(io, "$(x.cstr)(")
+	if length(x.args) > 0
+		for el in x.args[1:end-1]
+			show(io, el)
+			print(io, ", ")
+		end
+		show(io, x.args[end])
+	end
+	print(io, ")")
+end
 struct EmptyPat end
+
 counterexample(constructors, P::Vector{Vector{Pat}}, ts::Vector{Type}) = counterexample(constructors, P, ts, length(ts))
-function counterexample(constructors, P::Vector{Vector{Pat}}, ts::Vector{Type}, n::Int)::Union{Vector{Pat}, EmptyPat}
+function counterexample(constructors, P::Vector{Vector{Pat}}, ts::Vector{Type}, n::Int)::Union{Vector{CounterPat}, EmptyPat}
 	if n == 0
-		if length(P) == 0 return Pat[] end
+		if length(P) == 0 return CounterPat[] end
 		if length(first(P)) == 0 return EmptyPat() end
 	end
 
@@ -69,26 +96,26 @@ function counterexample(constructors, P::Vector{Vector{Pat}}, ts::Vector{Type}, 
 		# it is a complete signature
 		for head in all_heads
 			nhead = length(constructors(typ)[head])
-			rec = counterexample(constructors, 
-				specialize_matrix(constructors, typ, head, P), 
+			specmat = specialize_matrix(constructors, typ, head, P)
+			rec = counterexample(constructors, specmat, 
 				specialize_tyvect(constructors, typ, head, ts), 
 				nhead + n - 1)
 			if !(rec isa EmptyPat)
-				return Pat[CstrPat(head, rec[1:nhead]); rec[nhead+1:end]]
+				return CounterPat[CstrCounterPat(head, rec[1:nhead], typ); rec[nhead+1:end]]
 			end
 		end
 		return EmptyPat()
 	else
-		rec = counterexample(constructors, default_mat(P), n-1)
-		if rec isa EmptyPat()
+		rec = counterexample(constructors, default_mat(P), ts[2:end], n-1)
+		if rec isa EmptyPat
 			return EmptyPat()
 		end
 		if isempty(matched_heads) || !hasmethod(constructors, Tuple{Type{typ}})
-			return [StarPat(); rec[2:end]]
+			return [StarCounterPat(typ); rec]
 		else
-			example_head = first(matched_heads)
+			example_head = first(setdiff(Set(all_heads), matched_heads))
 			ex = constructors(typ)[example_head]
-			return [CstrPat(example_head, repeat([StarPat()], length(ex))); rec[2:end]]
+			return [CstrCounterPat(example_head, [StarCounterPat(t) for t in ex], typ); rec[2:end]]
 		end
 	end
 end
