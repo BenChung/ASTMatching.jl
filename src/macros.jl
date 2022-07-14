@@ -83,6 +83,9 @@ function _matchtype(typedecl, cstrs)
     	argof(::Type{$tyname}, e::$hostname, i) = e.$(tyargs.value)[i]
 	end)
     push!(expr.args, quote	
+    	args(::Type{$tyname}, e::$hostname,) = e.$(tyargs.value)
+	end)
+    push!(expr.args, quote	
     	constructors(::Type{$tyname}) = Dict($(constructor_pairs...))
 	end)
 	push!(expr.args, quote
@@ -108,6 +111,7 @@ pat ::=
 
 macro astmatch(discriminant, patterns)
 	preproc_pat, callbacks, vars = ASTMatching.preprocess_variables(ASTMatching.extract_patterns(patterns))
+	println(vars)
 	matchfun = gensym("match")
 	extracted_disc = Any[]
 	extracted_disc_tys = Any[]

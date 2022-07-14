@@ -1,5 +1,6 @@
 abstract type Pat end 
 struct StarPat <: Pat end
+struct MultiStarPat <: Pat end
 struct CstrPat <: Pat
 	cstr::Symbol
 	args::Vector{Pat}
@@ -11,6 +12,9 @@ struct OrPat <: Pat
 	left::Pat
 	right::Pat
 end
+struct MultiVarPat <: Pat
+    var::Symbol
+end
 
 struct MatchCase
 	patterns::Vector{Pat}
@@ -20,19 +24,24 @@ Base.:(==)(a::MatchCase, b::MatchCase) = all(a.patterns .== b.patterns) && a.bod
 
 iswildcard(::StarPat) = true
 iswildcard(::Pat) = false
-
+iswildcard(::MultiStarPat) = true
 heads(::StarPat) = Set{Symbol}()
 heads(c::CstrPat) = Set([c.cstr])
 heads(o::OrPat) = union(heads(o.left), heads(o.right))
-
+heads(::MultiStarPat) = Set{Symbol}()
 Base.:(==)(a::StarPat, b::StarPat) = true
 Base.:(==)(a::CstrPat, b::CstrPat) = a.cstr == b.cstr && all(a.args .== b.args)
 Base.:(==)(a::VarPat, b::VarPat) = a.var == b.var
 Base.:(==)(a::OrPat, b::OrPat) = a.left == b.left && a.right == b.right
-
+Base.:(==)(a::MultiStarPat, b::MultiStarPat) = true
+Base.:(==)(a::MultiVarPat, b::MultiVarPat) = a.var == b.var
 extract_pattern(sym::Any) = 
 	if sym == :(_)
 		StarPat()
+       elseif sym == :(__)
+            MultiStarPat()
+       elseif endswith(string(sym), "_")
+            MultiVarPat(Symbol(string(sym)[1:end-1]))
 	else 
 		VarPat(sym)
 	end

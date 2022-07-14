@@ -5,24 +5,41 @@ specialize_row(constructors, typ, head::Symbol, pat::CstrPat, rest)::Vector{Vect
 		[Pat[pat.args; rest]] 
 	else [] 
 	end
-specialize_row(constructors, typ, head::Symbol, pat::StarPat, rest)::Vector{Vector{Pat}} = [Pat[repeat([StarPat()], length(constructors(typ)[head])); rest]]
+specialize_row(constructors, typ, head::Symbol, pat::MultiStarPat, rest)::Vector{Vector{Pat}} = [Pat[arg_pats(constructors(eltype(typ))[head]); pat; rest]]
+specialize_row(constructors, typ, head::Symbol, pat::StarPat, rest)::Vector{Vector{Pat}} = [Pat[arg_pats(constructors(typ)[head]); rest]]
 specialize_row(constructors, typ, head::Symbol, pat::OrPat, rest)::Vector{Vector{Pat}} = 
 	[specialize_row(constructors, typ, head, pat.left, rest); 
 	 specialize_row(constructors, typ, head, pat.right, rest)]
 
 specialize_vect(constructors, typ, head::Symbol, vect::Vector{Pat}) = specialize_vect(constructors, typ, head, first(vect), vect[2:end])
 specialize_vect(constructors, typ, head::Symbol, pat::CstrPat, rest) = [pat.args; rest]
-specialize_vect(constructors, typ, head::Symbol, pat::StarPat, rest) = Pat[repeat([StarPat()], length(constructors(typ)[head])); rest]
+specialize_vect(constructors, typ, head::Symbol, pat::StarPat, rest) = Pat[arg_pats(constructors(typ)[head]); rest]
+specialize_vect(constructors, typ, head::Symbol, pat::MultiStarPat, rest) = Pat[arg_pats(constructors(eltype(typ))[head]); MultiStarPat(); rest]
 
-
-specialize_tyvect(constructors, typ, head::Symbol, tvs::Vector{Type}) = Type[constructors(typ)[head]; tvs[2:end]]
-
+specialize_tyvect(constructors, typ, head::Symbol, tvs::Vector{Type}, pats::Vector{<:Pat}) = specialize_tyvect(constructors, typ, head, tvs, first(pats))
+specialize_tyvect(constructors, typ, head::Symbol, tvs::Vector{Type}, hdPat::Pat) = Type[constructors(typ)[head]; tvs[2:end]]
+specialize_tyvect(constructors, typ, head::Symbol, tvs::Vector{Type}, hdPat::MultiStarPat) = Type[constructors(eltype(typ))[head]; tvs]
 default_mat(mat::Vector{Vector{Pat}})::Vector{Vector{Pat}}  = vcat((default_mat.(mat))...)
 default_mat(row::Vector{Pat})::Vector{Vector{Pat}} = default_mat(first(row), row)
 default_mat(pat::CstrPat, row)::Vector{Vector{Pat}} = []
 default_mat(pat::StarPat, row)::Vector{Vector{Pat}} = [row[2:end]]
+default_mat(pat::MultiStarPat, row)::Vector{Vector{Pat}} = [row]
 default_mat(pat::OrPat, row)::Vector{Vector{Pat}} = [default_mat(pat.left, row); default_mat(pat.right, row)]
 
+default_multi_mat(mat::Vector{Vector{Pat}})::Vector{Vector{Pat}} = vcat((default_multi_mat.(mat))...)
+function default_multi_mat(row::Vector{Pat})::Vector{Vector{Pat}}
+	limit = findfirst(p->p isa MultiStarPat, row)
+	if !isnothing(limit)
+		return Vector{Pat}[row[limit:end]]
+	else
+		return Vector{Pat}[]
+	end
+end
+
+function default_multi_tyvect(tvs, pats)
+	limit = findfirst(p->p isa MultiStarPat, pats)
+	return tvs[limit:end]
+end
 function useful(constructors, P::Vector{Vector{Pat}}, q::Vector{Pat}, ts::Vector{Type})
 	if length(q) == 0
 		return length(P) == 0
@@ -33,8 +50,8 @@ useful(constructors, typ, P::Vector{Vector{Pat}}, h::CstrPat, q::Vector{Pat}, ts
 	useful(typ, 
 		specialize_matrix(constructors, typ, h.cstr, P), 
 		specialize_vect(constructors, typ, h.cstr, q), 
-		specialize_tyvect(constructors, typ, h.cstr, ts))
-function useful(constructors, typ, P::Vector{Vector{Pat}}, h::StarPat, q::Vector{Pat}, ts::Vector{Type}) 
+		specialize_tyvect(constructors, typ, h.cstr, ts, q))
+function useful(constructors, typ, P::Vector{Vector{Pat}}, h::StarPat, q::Vector{Pat}, ts::Vector{Type})
 	matched_heads = reduce(union, heads.(first.(P)); init=Set{Symbol}())
 	if hasmethod(constructors, Tuple{Type{typ}}) && begin all_heads = keys(constructors(typ)); issetequal(matched_heads, all_heads) end 
 		for head in all_heads
@@ -42,16 +59,20 @@ function useful(constructors, typ, P::Vector{Vector{Pat}}, h::StarPat, q::Vector
 			specvect = specialize_vect(constructors, typ, head, q)
 			if useful(constructors, 
 				specmat, specvect, 
-				specialize_tyvect(constructors, typ, head, ts))
+				specialize_tyvect(constructors, typ, head, ts, q))
 				return true
 			end
 		end
 		return false
-	else 
-		dm = default_mat(P)
-		disc = q[2:end]
-		return useful(constructors, dm, disc, ts[2:end])
+    else
+        dm = default_mat(P)
+        return useful(constructors, dm, q[2:end], ts[2:end])
 	end
+end
+function useful(constructors, typ, P::Vector{Vector{Pat}}, h::MultiStarPat, q::Vector{Pat}, ts::Vector{Type})
+    dm = default_multi_mat(P)
+    dt = default_multi_tyvect(ts, q)
+    return useful(constructors, dm, q[2:end], dt)
 end
 useful(constructors, typ, P::Vector{Vector{Pat}}, h::OrPat, q::Vector{Pat}, ts::Vector{Type}) = useful(P, [h.left;q[2:end]], ts) || useful(P, [h.right;q[2:end]], ts)
 
@@ -98,7 +119,7 @@ function counterexample(constructors, P::Vector{Vector{Pat}}, ts::Vector{Type}, 
 			nhead = length(constructors(typ)[head])
 			specmat = specialize_matrix(constructors, typ, head, P)
 			rec = counterexample(constructors, specmat, 
-				specialize_tyvect(constructors, typ, head, ts), 
+				specialize_tyvect(constructors, typ, head, ts, arg_pats(ts)), 
 				nhead + n - 1)
 			if !(rec isa EmptyPat)
 				return CounterPat[CstrCounterPat(head, rec[1:nhead], typ); rec[nhead+1:end]]
@@ -106,7 +127,7 @@ function counterexample(constructors, P::Vector{Vector{Pat}}, ts::Vector{Type}, 
 		end
 		return EmptyPat()
 	else
-		rec = counterexample(constructors, default_mat(P), ts[2:end], n-1)
+		rec = rec = counterexample(constructors, default_mat(P), ts[2:end], n-1)
 		if rec isa EmptyPat
 			return EmptyPat()
 		end
