@@ -136,6 +136,30 @@ arg_pats(ts) = map(arg_pat, ts)
 arg_pat(::Type{<:AbstractArray}) = MultiStarPat()
 arg_pat(::Any) = StarPat()
 
+function consistent_arity(args, arity::Fixed) 
+	satisfying = arity.fixed
+	for arg in args
+		if arg isa StarPat || arg isa CstrPat
+			satisfying -= 1
+		elseif arg isa MultiStarPat
+			satisfying = 0
+			break
+		end
+	end
+	return satisfying == 0
+end
+function consistent_arity(args, arity::Expanding) 
+	satisfying = arity.fixed
+	for arg in args
+		if arg isa StarPat || arg isa CstrPat
+			satisfying -= 1
+		elseif arg isa MultiStarPat
+			return satisfying >= 0
+		end
+	end
+	return false
+end
+
 split_patts(P, i, patlen) = (getindex.(P, (1:(i-1),)), getindex.(P, i), getindex.(P, (i+1:patlen, )))
 function S(constructors, t, cstr_head, arity, i, P::Vector{ProcessedPattern})
 	match_patts = patterns.(P)
@@ -146,7 +170,7 @@ function S(constructors, t, cstr_head, arity, i, P::Vector{ProcessedPattern})
     cstr_pats = arg_pats(arguments, arity)
     adj_prefix, disc_pat, adj_postfix = split_patts(match_patts, i, patlen)
 	makerows(prefix, c::CstrPat, postfix, p) = 
-		if c.cstr == cstr_head
+		if c.cstr == cstr_head && consistent_arity(c.args, arity)
 			#@assert length(c.args) == length(arguments)
 			[ProcessedPattern([prefix; c.args; postfix], p.callback)] 
 		else
@@ -184,11 +208,13 @@ collect_arities(pats::Vector{ProcessedPattern}, i, c, n) = filter(x->!isnothing(
 collect_arity(pat::ProcessedPattern, i, c, n) = collect_arity(pat.patterns[i], c, n)
 collect_arity(cstrPat::CstrPat, c, n) = if cstrPat.cstr == c arity(cstrPat.args, n) else nothing end
 collect_arity(p, c, n) = nothing
-arity(ps::Vector{Pat}, n) = if any(x->x isa MultiStarPat, ps) 
+function arity(ps::Vector{Pat}, n)
+	if any(x->x isa MultiStarPat, ps) 
 		Expanding(length(ps)-1-n) 
 	else 
 		Fixed(length(ps)-n)
 	end
+end
 
 function cc(constructors, o::Vector{Vector{Int}}, P::Vector{ProcessedPattern}, types::Vector{T} where T<:Type) where K
 	if length(P) == 0 return Fail() end
@@ -224,5 +250,6 @@ function cc(constructors, o::Vector{Vector{Int}}, P::Vector{ProcessedPattern}, t
 	if !issetequal(cstr_heads, possible_heads)
 		default = cc(constructors, vcat(o[1:i-1], o[i+1:end]), Dsingle(i, P), vcat(types[1:i-1], types[i+1:end]))
 	end
-	return Switch{elem_type}(o[i], switch, default)
+	res = Switch{elem_type}(o[i], switch, default)
+	return res
 end

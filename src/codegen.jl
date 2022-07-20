@@ -9,7 +9,7 @@ function compile(constructor_keys, constructors, s::Switch{T}, var_map::Trie{Occ
 	cstrs = constructors(T)
 	cstr_keys = constructor_keys(T)
 	occ = map(Index, s.occ)
-	arity_check(expr, arity::Expanding) = :($expr <= $(arity.fixed))
+	arity_check(expr, arity::Expanding) = :($expr >= $(arity.fixed))
 	arity_check(expr, arity::Fixed) = :($expr == $(arity.fixed))
 	function make_conditional(case_idx)
 		# condition

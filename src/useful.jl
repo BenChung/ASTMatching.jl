@@ -26,6 +26,10 @@ default_mat(pat::StarPat, row)::Vector{Vector{Pat}} = [row[2:end]]
 default_mat(pat::MultiStarPat, row)::Vector{Vector{Pat}} = [row]
 default_mat(pat::OrPat, row)::Vector{Vector{Pat}} = [default_mat(pat.left, row); default_mat(pat.right, row)]
 
+default_tyvect(tyv)=default_tyvect(first(tyv), tyv)
+default_tyvect(fty::MultiStarPat, tyv) = tyv
+default_tyvect(fty, tyv) = tyv[2:end]
+
 default_multi_mat(mat::Vector{Vector{Pat}})::Vector{Vector{Pat}} = vcat((default_multi_mat.(mat))...)
 function default_multi_mat(row::Vector{Pat})::Vector{Vector{Pat}}
 	limit = findfirst(p->p isa MultiStarPat, row)
@@ -66,7 +70,7 @@ function useful(constructors, typ, P::Vector{Vector{Pat}}, h::StarPat, q::Vector
 		return false
     else
         dm = default_mat(P)
-        return useful(constructors, dm, q[2:end], ts[2:end])
+        return useful(constructors, dm, q[2:end], default_tyvect(ts))
 	end
 end
 function useful(constructors, typ, P::Vector{Vector{Pat}}, h::MultiStarPat, q::Vector{Pat}, ts::Vector{Type})

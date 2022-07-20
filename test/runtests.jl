@@ -34,7 +34,6 @@ ASTMatching.@matchtype ExampleAST2 <: BaseASTStruct2{:kind, :arguments} begin
     Block{:block}(body::Vector{ExampleAST2})
     Constant{:cnst}()
 end
-
 @testset "ASTMatching.jl" begin
 	Pat = ASTMatching.Pat
 	StarPat = ASTMatching.StarPat
@@ -44,6 +43,7 @@ end
 	CstrPat = ASTMatching.CstrPat
 	Fixed = ASTMatching.Fixed
 	Expanding = ASTMatching.Expanding
+	
 	@test List == ASTMatching.UnionType{BaseStruct, :kind, :arguments}
 	@test constructors(List) == Dict([:Cons => [List, String], :Nil=>Any[]])
 	@test constructor_keys(List) == Dict([:Cons => :cons, :Nil => :nil])
@@ -130,6 +130,14 @@ end
 		APP(APat[CstrPat(:Nil, Pat[])], :b)], [List]) == 
 		ASTMatching.Switch{List}([1], [(:Cons, Fixed(2)) => ASTMatching.Leaf(:a), (:Nil, Fixed(0))=>ASTMatching.Leaf(:b)], nothing)
 
+	@test ASTMatching.consistent_arity([StarPat(), StarPat()], ASTMatching.Fixed(2))
+	@test ASTMatching.consistent_arity([StarPat(), CstrPat(:cons, [])], ASTMatching.Fixed(2))
+	@test !ASTMatching.consistent_arity([StarPat()], ASTMatching.Fixed(2))
+	@test !ASTMatching.consistent_arity([], ASTMatching.Expanding(0))
+	@test ASTMatching.consistent_arity([StarPat(), MultiStarPat()], ASTMatching.Expanding(2))
+	@test !ASTMatching.consistent_arity([StarPat(), MultiStarPat()], ASTMatching.Expanding(0))
+
+
 	# just make sure it doesn't error
 	preproc_pat, callbacks, vars = ASTMatching.preprocess_variables(ASTMatching.extract_patterns(quote 
 		Cons(a,b) => 2+2
@@ -160,12 +168,15 @@ end
 		Nil() => "hi"
 	end)
 	@test result == "hello"
+
+	x = BaseStruct(:cons, [BaseStruct(:nil, []), "hello"])
 	result = (ASTMatching.@astmatch (x::List) begin 
 		Cons(Nil(),b) => b
 		Cons(a,b) => "guten tag"
 		Nil() => "hi"
 	end)
 	@test result == "hello"
+	
 	result = (ASTMatching.@astmatch (x::List) begin 
 		Cons(a,b) => "guten tag"
 		Cons(Nil(),b) => b
@@ -213,13 +224,11 @@ end
 	    (UnaryOp(op, expr), l) => "unop"
 	    (Constant(cst), l) => "constant $cst"
 	end))
-
 	expr2 = BaseASTStruct2(:block, [BaseASTStruct2(:cnst, [])])
     res = ASTMatching.@astmatch (expr2::ExampleAST2) begin
             Block(body_) => body
             Constant() => []
     end
-    println(res)
     @test first(res) == first(expr2.arguments)
 
 	expr = BaseASTStruct2(:block, [BaseASTStruct2(:cnst, []), BaseASTStruct2(:cnst, [])])
@@ -228,13 +237,19 @@ end
             Block(body_) => body
             Constant() => []
     end
+    @test res == first(expr.arguments)
+    res = ASTMatching.@astmatch (expr2::ExampleAST2) begin
+            Block(a, b) => a
+            Block(body_) => body
+            Constant() => []
+    end
     @test first(res) == first(expr2.arguments)
 end
-
 
 @testset "Usefulness" begin
 	Pat = ASTMatching.Pat
 	StarPat = ASTMatching.StarPat
+	MultiStarPat = ASTMatching.MultiStarPat
 	VarPat = ASTMatching.VarPat
 	CstrPat = ASTMatching.CstrPat
 	@test !ASTMatching.useful(constructors, [Pat[CstrPat(:Cons, [StarPat(), StarPat()])], Pat[CstrPat(:Nil, [])]], Pat[StarPat()], Type[List])
@@ -243,6 +258,29 @@ end
 	@test ASTMatching.useful(constructors, Vector{Pat}[
 		[CstrPat(:Cons, Pat[StarPat(), StarPat()]), CstrPat(:Cons, Pat[StarPat(), StarPat()])],
 		[CstrPat(:Cons, Pat[StarPat(), StarPat()]), CstrPat(:Nil, Pat[])]], Pat[StarPat(), StarPat()], Type[List, List])
+	@test ASTMatching.useful(constructors, Vector{Pat}[
+		[CstrPat(:Cons, Pat[StarPat(), StarPat()]), StarPat()]], 
+		Pat[StarPat(), MultiStarPat()], Type[List, Vector{List}])
+	@test !ASTMatching.useful(constructors, Vector{Pat}[
+		[CstrPat(:Cons, Pat[StarPat(), StarPat()]), MultiStarPat()],
+		[CstrPat(:Nil, Pat[]), MultiStarPat()]], 
+		Pat[StarPat(), MultiStarPat()], Type[List, Vector{List}])
+	@test !ASTMatching.useful(constructors, Vector{Pat}[
+		[CstrPat(:Cons, Pat[StarPat(), StarPat()]), MultiStarPat()],
+		[CstrPat(:Nil, Pat[]), MultiStarPat()]], 
+		Pat[StarPat(), MultiStarPat()], Type[List, Vector{List}])
+	@test ASTMatching.useful(constructors, Vector{Pat}[
+			[CstrPat(:Block, [])],
+			[CstrPat(:Constant, [])]
+		], Pat[StarPat()], Type[ExampleAST2])
+	@test !ASTMatching.useful(constructors, Vector{Pat}[
+			[CstrPat(:Block, [MultiStarPat()])],
+			[CstrPat(:Constant, [])]
+		], Pat[StarPat()], Type[ExampleAST2])
+	@test ASTMatching.useful(constructors, Vector{Pat}[
+			[CstrPat(:Block, [StarPat()])],
+			[CstrPat(:Constant, [])]
+		], Pat[CstrPat(:Block, [MultiStarPat()])], Type[ExampleAST2])
 	basis =  Vector{Pat}[
 		Pat[ASTMatching.CstrPat(:BinOp, Pat[ASTMatching.StarPat(), ASTMatching.StarPat(), ASTMatching.StarPat()]),
   	  		ASTMatching.CstrPat(:Cons, Pat[ASTMatching.StarPat(), ASTMatching.StarPat()])],
